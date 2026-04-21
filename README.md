@@ -318,10 +318,10 @@ Path (cost 3, transfers 1): Station A → Station B → [Station B L1→L2] → 
 
 ## ⚠️ Notes
 
-· Station names should ideally be unique to avoid confusion.
-· Deleting a station may break a loop line; if needed, manually reconnect the ends.
-· goTo returns null when the destination is unreachable; always check for null.
-· For large networks (>1000 stations), consider reducing console logging to avoid clutter.
+- Station names should ideally be unique to avoid confusion.
+- Deleting a station may break a loop line; if needed, manually reconnect the ends.
+- goTo returns null when the destination is unreachable; always check for null.
+- For large networks (>1000 stations), consider reducing console logging to avoid clutter.
 
 ---
 
