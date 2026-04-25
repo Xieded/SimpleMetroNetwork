@@ -5,7 +5,7 @@ import java.util.*;
  * 地铁网络路径规划系统 - 完整测试套件
  * 覆盖基本功能、换乘、环线、别名、增删改、边界异常等场景
  */
-public class Test {
+public class test {
     static int passed = 0;
     static int failed = 0;
 

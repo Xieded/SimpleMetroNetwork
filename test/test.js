@@ -1,5 +1,5 @@
 // test/test.js – Basic smoke test for MetroStation.js and MetroStation_zh.js
-import { Station, RailWay, printPathDetailed } from '../MetroStation.js';
+import { Station, RailWay, printPathDetailed } from '../madeJS/MetroStation.js';
 import {
   Station as StationZH,
   RailWay as RailWayZH,
