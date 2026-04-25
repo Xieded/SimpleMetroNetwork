@@ -1,25 +1,26 @@
-# 🚇 Metro Network Path Finder
+# Metro Network Path Finder JS 
 
-A JavaScript-based metro network modeling and shortest path query tool. Supports multiple lines, transfer penalty, loop lines, and dynamic station insertion. Uses **Dijkstra's algorithm** on the `(station, current line)` state space to find optimal routes with transfer cost.
+A JavaScript-based metro network modeling and shortest path query tool. Supports multiple lines, transfer penalty, loop lines, and dynamic station insertion.   
+Uses Bidirectional BFS on the (station, current line) state space to find optimal routes with transfer cost.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## ✨ Features
+## Features
 
 - **Flexible Station & Line Model**: Stations can belong to multiple lines; lines can be marked as loops.
 - **Convenient Network Construction**: `connectStations` method for batch connection with automatic bidirectional linking and line assignment.
 - **Transfer Penalty Mechanism**: Transfers count as an extra station; the algorithm automatically selects the optimal transfer plan.
 - **Clear Path Visualization**: Path output annotates transfer stations with line switches (e.g., `[Beijing East R2→R1]`).
 - **Dynamic Station Operations**: Insert, delete, and pop stations on a line with automatic connection adjustments.
-- **Robust Graph Algorithm**: State‑space Dijkstra ensures efficiency and correctness.
+- **Robust Graph Algorithm**: State‑space Bidirectional BFS ensures efficiency and correctness.
+- **Reliable Alias System**: Stations can have multiple aliases; line binding and display remain stable regardless of name changes.
+## Files
 
-## 📁 Files
-
-- `metro_network_zh.js` – Source code with Chinese comments
-- `metro_network_en.js` – Source code with English comments
+- `MetroStation_zh.js` – Source code with Chinese comments
+- `MetroStation.js` – Source code with English comments
 - `README.md` – This document
 
-## 🧱 Core Classes & Methods
+## Core Classes & Methods
 
 ### `Station` Class
 
@@ -29,6 +30,13 @@ A JavaScript-based metro network modeling and shortest path query tool. Supports
 | `addLine(line)` | Add a line that this station belongs to |
 | `static addConnectStation(a, b)` | Establish bidirectional adjacency |
 | `goTo(targetStation)` | Find shortest path, returns array with `linePath` property |
+| `pushName(alias) ` | Add a new alias and switch current name to it |
+| `popName() ` | Remove the last alias and revert to the first name |
+| `changeName(index) ` | Switch current name to the alias at the given index |
+| `deleteName(index) ` | Delete the alias at the index (at least one remains) |
+| `findName(name) ` | Find the index of a name, or -1 if not found |
+| `getBoundNameForLine(line) ` | Get the bound name of the station on a specific line |
+| `showNextStations() / showUpStations() ` | Print neighboring stations |
 
 ### `RailWay` Class
 
@@ -41,6 +49,7 @@ A JavaScript-based metro network modeling and shortest path query tool. Supports
 | `deleteStation(station)` | Remove a station and reconnect its neighbors |
 | `insertStation(from, insert)` | Insert a new station after `from` on the same line |
 | `showRailWayStations()` | Print ordered station list with line info |
+| `changeStationName(pastStation, newName) ` | Quickly change the bound name of a station on this line |
 
 ### Helper Functions
 
@@ -51,39 +60,51 @@ A JavaScript-based metro network modeling and shortest path query tool. Supports
 
 ---
 
-## 🚀 Quick Start
-
 ```javascript
+// Import (choose based on your environment)
+import { Station, RailWay, printPathDetailed } from './MetroStation_zh.js';
+// or: const { Station, RailWay, printPathDetailed } = require('./MetroStation_zh.js');
+
 // Create stations
-const BeijingSouth = new Station("Beijing South");
-const BeijingNorth = new Station("Beijing North");
-const BeijingWest = new Station("Beijing West");
-const BeijingEast = new Station("Beijing East");
-const BeijingCentral = new Station("Beijing Central");
+const S1 = new Station("Station A");
+const S2 = new Station("Station B");
+const S3 = new Station("Station C");
+const S4 = new Station("Station D");
 
 // Create lines
-const R1 = new RailWay("R1");
-const R2 = new RailWay("R2");
+const L1 = new RailWay("L1");
+const L2 = new RailWay("L2");
 
-// Batch connect stations
-R1.connectStations(BeijingNorth, BeijingEast, BeijingSouth, BeijingWest);
-R2.connectStations(ShanghaiNorth, ShanghaiSouth, ShanghaiWest, BeijingEast, Heilongjiang);
+// Build network
+L1.connectStations(S1, S2, S3);
+L2.connectStations(S4, S2);   // S2 becomes transfer station
 
-// Insert BeijingCentral between BeijingEast and BeijingSouth on R1
-R1.insertStation(BeijingEast, BeijingCentral);
+// Add alias to S2 (original name on L1 is "Station B")
+S2.pushName("Transfer Hub");       // Current name becomes "Transfer Hub"
+L1.showRailWayStations();          // Still shows bound name "Station B" on L1
+L2.showRailWayStations();          // Shows "Station B" (bound when added to L2)
 
-// Display line info
-R1.showRailWayStations();
+// Find path
+const path = S1.goTo(S4);
+printPathDetailed(path, S1, S4);
+```
 
-// Find and print path
-const path = Heilongjiang.goTo(BeijingWest);
-printPathDetailed(path, Heilongjiang, BeijingWest);
+Example output:
 
+```
+===== L1 =====
+Station A-[L1] → Station B-[L1, L2] → Station C-[L1], total 3 stations
+===============
+===== L2 =====
+Station D-[L2] → Station B-[L1, L2], total 2 stations
+===============
+Path (from Station A to Station D, passing 2 stops, including 0 transfers):
+    Station A → Transfer Hub
 ```
 
 ---
 
-## 🧠 Algorithm
+## Algorithm
 
 Shortest path is computed using Dijkstra's algorithm on the state space (station, current line):
 
@@ -94,7 +115,7 @@ This naturally incorporates transfer penalties into edge weights, guaranteeing t
 
 ---
 
-## ❓ Q&A
+## Q&A
 
 ### Q1: Why does the transfer count show as 0 in the output?
 
@@ -133,9 +154,17 @@ A: Currently the transfer penalty is fixed at 1. To customize, modify the newCos
 
 A: The code uses ES6 syntax and can be included directly via a script tag or as a module. Ensure your target browsers support modern JavaScript.
 
+### Q9: What does the alias system do? Does it affect path calculation?
+
+A: The alias system allows a station to display different names at different times (e.g., after real‑world renaming). It does not affect path calculation because the algorithm operates on object references. Line printing and path output use the bound name (the name at the time the station joined the line), ensuring display stays consistent despite alias changes.
+
+### Q10: How can I restore a station's original name?
+
+A: The very first name given at creation is always kept at index 0 in the alias list. Call changeName(0) or execute popName() until only one alias remains to restore the original name.
+
 ---
 
-## 📖 Detailed Usage Guide
+## Detailed Usage Guide
 
 ### 1. Installation & Import
 
@@ -199,7 +228,23 @@ R1.pushStation(Chegongmiao);
 R2.pushStation(Chegongmiao);   // Automatically becomes a transfer station
 ```
 
-### 5. Finding the Shortest Path
+### 5. Managing Station Aliases
+
+```javascript
+const Xierqi = new Station("Xierqi");
+Xierqi.pushName("Xierqi Station");      // Adds and switches to "Xierqi Station"
+Xierqi.pushName("Xierqi Metro Stop");   // Adds another alias
+
+console.log(Xierqi.getStationName());   // "Xierqi Metro Stop"
+Xierqi.changeName(0);                   // Switch back to first name "Xierqi"
+Xierqi.popName();                       // Remove last alias, revert to "Xierqi"
+```
+
+Use the alias system to give stations alternative display names without affecting the network structure. Line‑bound names (recorded when a station joins a line) remain unchanged unless changeStationName is explicitly called on the line.
+
+Note: The bound name shown in showRailWayStations and path output always reflects the name at the time of joining. To change the bound name on a specific line, use RailWay.changeStationName(station, newName).
+
+### 6. Finding the Shortest Path
 
 Call the goTo(targetStation) method on the starting station.
 
@@ -211,16 +256,18 @@ printPathDetailed(path, BeijingNorth, BeijingWest);
 Sample Output:
 
 ```
-Path (cost 3, transfers 0): Beijing North → Beijing East → Beijing South → Beijing West
+Path (from Beijing North to Beijing West, passing 3 stops, including 0 transfers):
+    Beijing North → Beijing East → Beijing South → Beijing West
 ```
 
 With a transfer, it appears as:
 
 ```
-Path (cost 5, transfers 1): Heilongjiang → Beijing East → [Beijing East R2→R1] → Beijing Central → Beijing South → Beijing West
+Path (from Heilongjiang to Beijing West, passing 5 stops, including 1 transfers):
+    Heilongjiang → Beijing East → [Beijing East R2 - Beijing East R1] → Beijing Central → Beijing South → Beijing West
 ```
 
-### 6. Line Maintenance Operations
+### 7. Line Maintenance Operations
 
 #### Insert a Station
 
@@ -242,7 +289,7 @@ const last = R1.popStation();
 console.log(`Removed station: ${last.getStationName()}`);
 ```
 
-### 7. Viewing Line Information
+### 8. Viewing Line Information
 
 ```javascript
 R1.showRailWayStations();
@@ -256,7 +303,9 @@ Beijing North-[Line 1] → Beijing East-[Line 1, Line 2] → Beijing South-[Line
 ===============
 ```
 
-### 8. Customizing Transfer Penalty Weight
+The line display always uses the bound name, regardless of any alias changes.
+
+### 9. Customizing Transfer Penalty Weight
 
 To adjust the transfer cost, modify the newCost calculation in the transfer section of the goTo method.
 
@@ -269,7 +318,7 @@ const TRANSFER_PENALTY = 3;
 const newCost = cost + TRANSFER_PENALTY;
 ```
 
-### 9. Obtaining Raw Path Data
+### 10. Obtaining Raw Path Data
 
 The array returned by goTo has an attached linePath property, which can be used for custom display or export.
 
@@ -279,44 +328,49 @@ console.log(path);               // Array of stations
 console.log(path.linePath);      // Corresponding line for each station
 ```
 
-### 10. Complete Example
-
-A full example including a transfer:
+### 11. Complete Example (with aliases)
 
 ```javascript
-import { Station, RailWay, printPathDetailed } from './MetroStation_en.js';
+import { Station, RailWay, printPathDetailed } from './MetroStation_zh.js';
 
-// Create stations
 const A = new Station("Station A");
 const B = new Station("Station B");
 const C = new Station("Station C");
 const D = new Station("Station D");
 const E = new Station("Station E");
 
-// Create lines
 const L1 = new RailWay("L1");
 const L2 = new RailWay("L2");
 
-// Connect L1: A - B - C
 L1.connectStations(A, B, C);
+L2.connectStations(D, B, E);   // B is transfer
 
-// Connect L2: D - B - E
-L2.connectStations(D, B, E);
+// Add alias to B
+B.pushName("Transfer Hub");
 
-// Find path: A to E
 const path = A.goTo(E);
 printPathDetailed(path, A, E);
+
+L1.showRailWayStations();
+L2.showRailWayStations();
 ```
 
 Expected output:
 
 ```
-Path (cost 3, transfers 1): Station A → Station B → [Station B L1→L2] → Station E
+Path (from Station A to Station E, passing 3 stops, including 1 transfers):
+    Station A → Transfer Hub → [Transfer Hub L1 - Transfer Hub L2] → Station E
+===== L1 =====
+Station A-[L1] → Station B-[L1, L2] → Station C-[L1], total 3 stations
+===============
+===== L2 =====
+Station D-[L2] → Station B-[L1, L2] → Station E-[L2], total 3 stations
+===============
 ```
 
 ---
 
-## ⚠️ Notes
+## Notes
 
 - Station names should ideally be unique to avoid confusion.
 - Deleting a station may break a loop line; if needed, manually reconnect the ends.

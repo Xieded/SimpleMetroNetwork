@@ -5,11 +5,11 @@
  * - 创建站点与线路
  * - 建立站点间的双向连接（支持环线、换乘）
  * - 插入、删除、弹出站点
- * - 带换乘惩罚的最短路径搜索（Dijkstra算法在状态空间 (站点, 当前线路) 上运行）
+ * - 带换乘惩罚的最短路径搜索（双向 BFS 算法在状态空间 (站点, 当前线路) 上运行）
  * - 可视化线路与路径信息，换乘处标注线路切换
  * 
  * 作者：Xieds
- * 版本：1.0.0
+ * 版本：26.4(1)
  */
 
 /**
@@ -52,13 +52,12 @@ function calcPathCost(path) {
  */
 function printPathDetailed(path, start, target) {
     // 参数校验
-    checkIsNone(path, "路线");
     checkIsNone(start, "开始站");
     checkIsNone(target, "终点站");
     
     // 若路径不存在，输出不可达信息
     if (!path) {
-        console.log(`${start.getStationName()} → ${target.getStationName()} : 无法到达`);
+        console.error(`    ${start.getStationName()} → ${target.getStationName()} : 无法到达`);
         return;
     }
     
@@ -80,15 +79,25 @@ function printPathDetailed(path, start, target) {
             const prevLine = linePath[i-1];
             const currLine = linePath[i];
             // 显示换乘信息，例如：[车公庙 1号线→11号线]
-            displayNames.push(`[${station.getStationName()} ${prevLine?.getLineName()}→${currLine?.getLineName()}]`);
+            const boundName = station.getBoundNameForLine(currLine)
+            const prevBoundName = station.getBoundNameForLine(prevLine)
+            displayNames.push(`[${boundName} ${prevLine?.getLineName()} - ${prevBoundName} ${currLine?.getLineName()}]`);
         } else {
             if (i > 0) cost++;
-            displayNames.push(station.getStationName());
+            const boundName = station.getBoundNameForLine(line)
+            displayNames.push(boundName);
         }
     }
     
     // 输出最终结果
-    console.log(`路径 (代价 ${cost}，其中换乘 ${transfers} 次)：${displayNames.join(" → ")}`);
+    // 获取起点和终点所在的线路（路径上实际使用的线路）
+	const startLine = linePath[0];
+	const endLine = linePath[linePath.length - 1];
+	// 使用线路绑定名称
+	const startBoundName = start.getBoundNameForLine(startLine);
+	const endBoundName = target.getBoundNameForLine(endLine);
+	console.log(`路径 (从 ${startBoundName} 到 ${endBoundName}，经过 ${path.length - 1} 个站点，其中换乘 ${transfers} 次)：
+    ${displayNames.join(" → ")}`);
 }
 
 /**
@@ -166,6 +175,8 @@ class Station {
     constructor(stationName) {
         checkIsNone(stationName, "站点名称");
         this.#stationName = stationName;
+        this.#nameList.push(stationName);
+        this.#lineToNameMap = new Map();
     }
 
     // 私有字段
@@ -174,6 +185,8 @@ class Station {
     #nextStations = [];             // 下一站列表（出站方向）
     #upStations = [];               // 上一站列表（进站方向）
     #connectWays = [];              // 所属线路列表
+    #nameList = [];					// 防止有多个名字而准备的列表
+    #lineToNameMap = new Map()		// key: RailWay 实例, value: 加入时的名称
 
     // 公开访问器
     getStationName() { return this.#stationName; }
@@ -181,6 +194,140 @@ class Station {
     getConnectWay() { return this.#connectWays; }
     getUpStations() { return this.#upStations; }
     getIsStartEnd() { return this.#isStartEnd; }
+    getNameList() { return this.#nameList; }
+
+    /**
+     * 转换自身名字为另一个别称
+     * @param {number} index 别称索引
+     * @returns 是否转换成功
+     */
+    changeName(index) {
+        if(index < 0 || index >= this.#nameList.length) { 
+            console.log(`转换${this.#stationName}失败，原因：索引不存在`)
+            return false 
+        }
+
+        console.log(`${this.#stationName} 已被转换为 ${this.#nameList[index]}`)
+        this.#stationName = this.#nameList[index]
+        return true
+    }
+
+    /**
+     * 查找名称索引（如果不存在，则返回 -1）
+     * @param {string} stationName 待查找名称
+     * @returns 名称索引
+     */
+    findName(stationName) {
+        if(stationName == undefined) return -1
+
+        for(let i = 0; i < this.#nameList.length; i++) {
+            if(this.#nameList[i] == stationName) return i
+        }
+
+        return -1
+    }
+
+    /**
+     * 加入站点别称（默认更改为新添入的别称名）
+     * @param {string} stationName 加入站点别称名
+     * @returns 是否成功
+     */
+    pushName(stationName) {
+        if(stationName == undefined) { 
+            return false 
+        }
+
+        if(!this.#nameList.includes(stationName)) {
+            this.#nameList.push(stationName)
+        }
+        console.log(`加入 ${stationName} 成功`)
+        console.log(`${this.#stationName} 已被转换为别名 ${stationName}`)
+        this.#stationName = stationName
+        return true
+    }
+
+    /**
+     * 弹出站点别称（默认更改为第一个名字）
+     * @returns 是否成功
+     */
+    popName() {
+        if(this.#nameList == null) { 
+            console.error(`弹出失败，原因：别名表为空`)
+            return false 
+        }
+
+        if(this.#nameList.length == 1) { 
+            console.error(`弹出失败，原因：别名表不能为空`)
+            return false 
+        }
+
+        console.log(`弹出 ${this.#nameList[length - 1]} 成功`)
+
+        this.#nameList.pop()
+        this.#stationName = this.#nameList[0]
+        return true
+    }
+
+    /**
+     * 依照索引删除别称（删除后默认更改为第一个名字）
+     * @param {number} index 要删除的别称索引
+     * @returns 是否成功
+     */
+    deleteName(index) {
+        if(this.#nameList == null) { 
+            console.error(`删除失败，原因：别名表不存在任何数值`)
+            return false 
+        }
+
+        if(this.#nameList.length <= 1) { 
+            console.error(`删除 ${this.#nameList[index]} 失败，原因：不能删除至别名表为空`)
+            return false 
+        }
+        if(index < 0 || index >= this.#nameList.length) { 
+            console.error(`删除失败，原因：索引不合法`)
+            return false 
+        }
+
+        console.log(`别名 ${this.#nameList[index]} 已被删除 `)
+        console.log(`${this.#stationName} 已被转换为 ${this.#nameList[0]}`)
+
+        this.#nameList.splice(index,1)
+        this.#stationName = this.#nameList[0]
+        return true
+    }
+
+    recordLineBinding(line,boundName) {
+        this.#lineToNameMap.set(line,boundName)
+    }
+
+    /**
+     * 获取在一个路线上的绑定名称
+     * @param {RailWay} line 路线实例
+     * @returns 在这个路线上的绑定名称 | 本名
+     */
+    getBoundNameForLine(line) {
+        return this.#lineToNameMap.get(line) || this.#stationName
+    }
+
+    /**
+ 	* （内部使用）确保某个名称存在于别名列表中，但不切换当前名称
+ 	* @param {string} name - 待确保的名称
+ 	*/
+	_ensureNameInList(name) {
+    	if (!name) return;
+    	if (!this.#nameList.includes(name)) {
+        	this.#nameList.push(name);
+    	}
+
+        this.#stationName = name
+	}
+
+    /**
+     * 内部删除方法，仅供 RailWay 类使用
+     */
+    _cleanLineBinding(line) {
+        this.#lineToNameMap.delete(line)
+    }
 
     /** 切换端点标志 */
     rollIsStartEnd() {
@@ -267,7 +414,7 @@ class Station {
 
     /**
      * 带换乘惩罚的最短路径搜索（换乘算作多坐一站）
-     * 使用 Dijkstra 算法在状态空间 (站点, 当前线路) 上搜索。
+     * 使用 双向BFS 在状态空间 (站点, 当前线路) 上搜索。
      * 代价规则：
      *   - 在同一线路内移动到相邻站点：代价 1
      *   - 在当前站点换乘到另一条线路：代价 1
@@ -276,120 +423,176 @@ class Station {
      * @returns {Station[] | null} 经过的站点序列（包含起止，连续重复站点表示换乘），并附有 linePath 属性；若不可达返回 null
      */
     goTo(targetStation) {
-        // 起点即终点
         if (this === targetStation) return [this];
 
-        // 获取起点和终点的所属线路
         const startLines = this.getConnectWay();
         if (startLines.length === 0) return null;
         const targetLines = targetStation.getConnectWay();
         if (targetLines.length === 0) return null;
 
-        // 状态节点的唯一标识：站点名称 + 线路名称
+        // 状态键：站点实例 + 线路实例（对象引用可作为 Map 键，但这里仍使用字符串方便调试）
         const getStateKey = (station, line) => `${station.getStationName()}|${line.getLineName()}`;
 
-        // 距离映射表：stateKey -> 从起点到该状态的最小代价
-        const dist = new Map();
-        // 前驱映射表：stateKey -> { prevKey, station, line } 用于回溯路径
-        const prev = new Map();
+        // 前向搜索：距离，父节点（{ station, line, key }）
+        const distF = new Map();
+        const parentF = new Map();   // 键 -> 父状态键
+        const stateInfoF = new Map(); // 键 -> { station, line }
+        const queueF = [];
 
-        // 优先队列（最小堆），元素格式 { cost, station, line }
-        const heap = new MinHeap((a, b) => a.cost - b.cost);
+        // 后向搜索
+        const distB = new Map();
+        const parentB = new Map();
+        const stateInfoB = new Map();
+        const queueB = [];
 
-        // 初始化：从起点的每条所属线路出发，代价为 0
+        // 初始化前向
         for (const line of startLines) {
-            const stateKey = getStateKey(this, line);
-            dist.set(stateKey, 0);
-            prev.set(stateKey, null);
-            heap.push({ cost: 0, station: this, line });
+            const key = getStateKey(this, line);
+            distF.set(key, 0);
+            parentF.set(key, null);
+            stateInfoF.set(key, { station: this, line });
+            queueF.push(key);
         }
 
-        let bestTargetKey = null;      // 到达终点的最优状态 key
-        let bestTargetCost = Infinity; // 到达终点的最小代价
+        // 初始化后向
+        for (const line of targetLines) {
+            const key = getStateKey(targetStation, line);
+            distB.set(key, 0);
+            parentB.set(key, null);
+            stateInfoB.set(key, { station: targetStation, line });
+            queueB.push(key);
+        }
 
-        // Dijkstra 主循环
-        while (!heap.isEmpty()) {
-            const { cost, station, line } = heap.pop();
-            const currentKey = getStateKey(station, line);
+        let meetKey = null;
 
-            // 如果当前代价已大于记录的最优值，跳过（懒惰删除）
-            if (cost > (dist.get(currentKey) ?? Infinity)) continue;
+        // 扩展函数：正向
+        const expandF = () => {
+            if (queueF.length === 0) return;
+            const curKey = queueF.shift();
+            const curDist = distF.get(curKey);
+            const { station, line } = stateInfoF.get(curKey);
 
-            // 检查是否到达目标站点（任意线路）
-            if (station === targetStation) {
-                if (cost < bestTargetCost) {
-                    bestTargetCost = cost;
-                    bestTargetKey = currentKey;
-                }
-                // 继续寻找更优的到达方式（可能从其他线路进入目标站代价更低）
+            // 相遇检测
+            if (distB.has(curKey)) {
+                meetKey = curKey;
+                return true; // 立即停止
             }
 
-            // 1. 同线路移动到相邻站点
-            // 获取所有邻居（下一站 + 上一站），并用 Set 去重
+            // 邻居：沿线路移动
             const neighbors = [...new Set([...station.getNextStations(), ...station.getUpStations()])];
             for (const neighbor of neighbors) {
-                // 判断相邻站点是否也属于当前线路
                 if (!neighbor.getConnectWay().includes(line)) continue;
-
-                const newCost = cost + 1;
-                const neighborKey = getStateKey(neighbor, line);
-                if (newCost < (dist.get(neighborKey) ?? Infinity)) {
-                    dist.set(neighborKey, newCost);
-                    prev.set(neighborKey, { prevKey: currentKey, station: neighbor, line });
-                    heap.push({ cost: newCost, station: neighbor, line });
+                const nextKey = getStateKey(neighbor, line);
+                if (!distF.has(nextKey)) {
+                    distF.set(nextKey, curDist + 1);
+                    parentF.set(nextKey, curKey);
+                    stateInfoF.set(nextKey, { station: neighbor, line });
+                    queueF.push(nextKey);
                 }
             }
 
-            // 2. 换乘到本站的其他线路（代价 +1）
+            // 换乘
             for (const otherLine of station.getConnectWay()) {
-                if (otherLine === line) continue; // 跳过当前线路
-
-                const newCost = cost + 1;
-                const transferKey = getStateKey(station, otherLine);
-                if (newCost < (dist.get(transferKey) ?? Infinity)) {
-                    dist.set(transferKey, newCost);
-                    prev.set(transferKey, { prevKey: currentKey, station, line: otherLine });
-                    heap.push({ cost: newCost, station, line: otherLine });
+                if (otherLine === line) continue;
+                const nextKey = getStateKey(station, otherLine);
+                if (!distF.has(nextKey)) {
+                    distF.set(nextKey, curDist + 1);
+                    parentF.set(nextKey, curKey);
+                    stateInfoF.set(nextKey, { station, line: otherLine });
+                    queueF.push(nextKey);
                 }
             }
-        }
+            return false;
+        };
 
-        // 没有可达路径
-        if (bestTargetKey === null) return null;
+        // 扩展函数：反向（逻辑相同）
+        const expandB = () => {
+            if (queueB.length === 0) return;
+            const curKey = queueB.shift();
+            const curDist = distB.get(curKey);
+            const { station, line } = stateInfoB.get(curKey);
 
-        // 回溯路径：从最佳终点状态反向追踪到起点，记录经过的状态（站点+线路）
-        const stationPath = [];
-        const linePath = [];
-        let curKey = bestTargetKey;
-
-        const states = []; // 临时存储状态顺序（从起点到终点）
-        while (curKey) {
-            const record = prev.get(curKey);
-            if (!record) {
-                // 到达起点状态（对应 this）
-                states.unshift({ station: this, line: startLines[0] });
-                break;
+            if (distF.has(curKey)) {
+                meetKey = curKey;
+                return true;
             }
-            states.unshift({ station: record.station, line: record.line });
-            curKey = record.prevKey;
+
+            const neighbors = [...new Set([...station.getNextStations(), ...station.getUpStations()])];
+            for (const neighbor of neighbors) {
+                if (!neighbor.getConnectWay().includes(line)) continue;
+                const nextKey = getStateKey(neighbor, line);
+                if (!distB.has(nextKey)) {
+                    distB.set(nextKey, curDist + 1);
+                    parentB.set(nextKey, curKey);
+                    stateInfoB.set(nextKey, { station: neighbor, line });
+                    queueB.push(nextKey);
+                }
+            }
+
+            for (const otherLine of station.getConnectWay()) {
+                if (otherLine === line) continue;
+                const nextKey = getStateKey(station, otherLine);
+                if (!distB.has(nextKey)) {
+                    distB.set(nextKey, curDist + 1);
+                    parentB.set(nextKey, curKey);
+                    stateInfoB.set(nextKey, { station, line: otherLine });
+                    queueB.push(nextKey);
+                }
+            }
+            return false;
+        };
+
+        // 交替扩展
+        while (queueF.length > 0 && queueB.length > 0 && meetKey === null) {
+            if (queueF.length <= queueB.length) {
+                if (expandF()) break;
+            } else {
+                if (expandB()) break;
+            }
         }
 
-        // 确保起点在数组开头
+        if (meetKey === null) return null;
+
+        // 重构路径：从 meetKey 向前回溯到起点，向后回溯到终点
+        const states = [];  // { station, line }
+
+        // 前向部分：从 meetKey 回溯到起点（逆序）
+        const fPath = [];
+        let key = meetKey;
+        while (key) {
+            const info = stateInfoF.get(key);
+            fPath.unshift({ station: info.station, line: info.line });
+            key = parentF.get(key);
+        }
+
+        // 后向部分：从 meetKey 向后到终点（排除 meetKey 自身，以免重复）
+        const bPath = [];
+        key = parentB.get(meetKey);
+        while (key) {
+            const info = stateInfoB.get(key);
+            bPath.push({ station: info.station, line: info.line });
+            key = parentB.get(key);
+        }
+
+        // 合并：前向路径 + 后向路径
+        states.push(...fPath, ...bPath);
+
+        // 确保起点是 this，终点是 targetStation（可能因重名等问题略有偏差，修正一下）
         if (states.length === 0 || states[0].station !== this) {
             states.unshift({ station: this, line: startLines[0] });
         }
-        // 确保终点在数组末尾
         if (states[states.length - 1].station !== targetStation) {
             states.push({ station: targetStation, line: targetLines[0] });
         }
 
-        // 填充站点路径和对应线路路径
+        // 构建返回的站点路径和线路路径
+        const stationPath = [];
+        const linePath = [];
         for (const s of states) {
             stationPath.push(s.station);
             linePath.push(s.line);
         }
 
-        // 将线路路径附加到站点数组上，供 printPathDetailed 使用
         stationPath.linePath = linePath;
         return stationPath;
     }
@@ -457,6 +660,7 @@ class RailWay {
 
         this.#railWayStations.push(station);
         station.addLine(this); // 双向关联：站点也记录所属线路
+        station.recordLineBinding(this,station.getStationName())
         console.log(`${station.getStationName()} 加入 ${this.#lineName} 线`);
         return true;
     }
@@ -515,6 +719,8 @@ class RailWay {
             station.getConnectWay().splice(lineIndex, 1);
         }
 
+        station._cleanLineBinding(this);
+
         console.log(`${station.getStationName()} 已从 ${this.#lineName} 线中删除`);
         return true;
     }
@@ -558,6 +764,27 @@ class RailWay {
         return true;
     }
 
+    /**
+	* 快捷更改已绑定站点名
+ 	* @param {Station} pastStation - 要更改绑定名的站点实例
+ 	* @param {string} newStationName - 新的绑定名称
+ 	* @returns {boolean} 是否更改成功
+ 	*/
+	changeStationName(pastStation, newStationName) {
+    	if (!this.#railWayStations.includes(pastStation)) {
+        	console.error(`站点 ${pastStation?.getStationName?.() || pastStation} 不在 ${this.#lineName} 线中`);
+        	return false;
+    	}
+
+    	const oldBoundName = pastStation.getBoundNameForLine(this);
+    	// 确保新名称存在于别名列表中，但不改变站点当前显示名
+    	pastStation._ensureNameInList(newStationName);
+    	// 更新线路绑定名
+    	pastStation.recordLineBinding(this, newStationName);
+
+    	console.log(`${oldBoundName} 在 ${this.#lineName} 线上的绑定名称已更改为 ${newStationName}`);
+    	return true;
+	}
     /**
      * 私有方法：获取站点在本线路中的下一站（同线路）
      * @param {Station} station - 当前站点
@@ -611,7 +838,8 @@ class RailWay {
         console.log(`===== ${this.#lineName} ${this.#isLoop ? '(环线)' : ''} =====`);
         const stationList = this.#railWayStations.map(s => {
             const lines = s.getConnectWay().map(l => l.getLineName());
-            return `${s.getStationName()}-[${lines.join(', ')}]`;
+            const boundName = s.getBoundNameForLine(this)
+            return `${boundName}-[${lines.join(', ')}]`;
         });
         console.log(`${stationList.join(' → ')}, 共 ${stationList.length} 个站`);
         console.log("===============");

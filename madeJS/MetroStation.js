@@ -5,11 +5,11 @@
  * - Create stations and lines
  * - Establish bidirectional connections between stations (supports loops and transfers)
  * - Insert, delete, and pop stations
- * - Shortest path search with transfer penalty (Dijkstra's algorithm on state space (station, current line))
+ * - Shortest path search with transfer penalty (Bidirectional BFS on state space (station, current line))
  * - Visualize line and path information, marking line switches at transfer points
  * 
  * Author: Xieds
- * Version: 1.0.0
+ * Version: 26.4(1)
  */
 
 /**
@@ -52,13 +52,12 @@ function calcPathCost(path) {
  */
 function printPathDetailed(path, start, target) {
     // Parameter validation
-    checkIsNone(path, "path");
     checkIsNone(start, "start station");
     checkIsNone(target, "target station");
     
     // If path is null, output unreachable message
     if (!path) {
-        console.log(`${start.getStationName()} → ${target.getStationName()} : Unreachable`);
+        console.error(`    ${start.getStationName()} → ${target.getStationName()} : Unreachable`);
         return;
     }
     
@@ -79,20 +78,30 @@ function printPathDetailed(path, start, target) {
             cost++;
             const prevLine = linePath[i-1];
             const currLine = linePath[i];
-            // Show transfer info, e.g., [Chegongmiao Line1→Line11]
-            displayNames.push(`[${station.getStationName()} ${prevLine?.getLineName()}→${currLine?.getLineName()}]`);
+            // Show transfer info, e.g., [Chegongmiao Line1 → Line11]
+            const boundName = station.getBoundNameForLine(currLine);
+            const prevBoundName = station.getBoundNameForLine(prevLine);
+            displayNames.push(`[${boundName} ${prevLine?.getLineName()} - ${prevBoundName} ${currLine?.getLineName()}]`);
         } else {
             if (i > 0) cost++;
-            displayNames.push(station.getStationName());
+            const boundName = station.getBoundNameForLine(line);
+            displayNames.push(boundName);
         }
     }
     
     // Output final result
-    console.log(`Path (cost ${cost}, transfers ${transfers}): ${displayNames.join(" → ")}`);
+    // Get the lines actually used at the start and end of the path
+    const startLine = linePath[0];
+    const endLine = linePath[linePath.length - 1];
+    // Use line-bound names
+    const startBoundName = start.getBoundNameForLine(startLine);
+    const endBoundName = target.getBoundNameForLine(endLine);
+    console.log(`Path (from ${startBoundName} to ${endBoundName}, passing ${path.length - 1} stops, including ${transfers} transfers):
+    ${displayNames.join(" → ")}`);
 }
 
 /**
- * Min-heap (priority queue) for efficiently retrieving the state with minimum cost in Dijkstra's algorithm
+ * Min-heap (priority queue) for efficiently retrieving the state with minimum cost (retained for compatibility)
  */
 class MinHeap {
     /**
@@ -166,6 +175,8 @@ class Station {
     constructor(stationName) {
         checkIsNone(stationName, "station name");
         this.#stationName = stationName;
+        this.#nameList.push(stationName);
+        this.#lineToNameMap = new Map();
     }
 
     // Private fields
@@ -174,6 +185,8 @@ class Station {
     #nextStations = [];             // List of next stations (outbound direction)
     #upStations = [];               // List of previous stations (inbound direction)
     #connectWays = [];              // List of lines this station belongs to
+    #nameList = [];                 // List prepared for multiple names/aliases
+    #lineToNameMap = new Map();     // key: RailWay instance, value: name when added
 
     // Public accessors
     getStationName() { return this.#stationName; }
@@ -181,6 +194,146 @@ class Station {
     getConnectWay() { return this.#connectWays; }
     getUpStations() { return this.#upStations; }
     getIsStartEnd() { return this.#isStartEnd; }
+    getNameList() { return this.#nameList; }
+
+    /**
+     * Change the station's current name to another alias by index
+     * @param {number} index - Index of the alias
+     * @returns {boolean} Whether the change succeeded
+     */
+    changeName(index) {
+        if (index < 0 || index >= this.#nameList.length) { 
+            console.log(`Failed to change name of ${this.#stationName}: index does not exist`);
+            return false;
+        }
+
+        console.log(`${this.#stationName} has been changed to ${this.#nameList[index]}`);
+        this.#stationName = this.#nameList[index];
+        return true;
+    }
+
+    /**
+     * Find the index of a name (returns -1 if not found)
+     * @param {string} stationName - Name to find
+     * @returns {number} Index of the name, or -1
+     */
+    findName(stationName) {
+        if (stationName == undefined) return -1;
+
+        for (let i = 0; i < this.#nameList.length; i++) {
+            if (this.#nameList[i] == stationName) return i;
+        }
+
+        return -1;
+    }
+
+    /**
+     * Add an alias for the station (defaults to switching to the new alias)
+     * @param {string} stationName - Alias to add
+     * @returns {boolean} Whether the operation succeeded
+     */
+    pushName(stationName) {
+        if (stationName == undefined) { 
+            return false;
+        }
+
+        if (!this.#nameList.includes(stationName)) {
+            this.#nameList.push(stationName);
+        }
+        console.log(`Added alias ${stationName} successfully`);
+        console.log(`${this.#stationName} has been switched to alias ${stationName}`);
+        this.#stationName = stationName;
+        return true;
+    }
+
+    /**
+     * Remove the last alias (defaults to switching to the first name)
+     * @returns {boolean} Whether the operation succeeded
+     */
+    popName() {
+        if (this.#nameList == null) { 
+            console.error(`Pop failed: alias list is empty`);
+            return false;
+        }
+
+        if (this.#nameList.length == 1) { 
+            console.error(`Pop failed: alias list cannot be empty`);
+            return false;
+        }
+
+        console.log(`Popped ${this.#nameList[this.#nameList.length - 1]} successfully`);
+
+        this.#nameList.pop();
+        this.#stationName = this.#nameList[0];
+        return true;
+    }
+
+    /**
+     * Delete an alias by index (defaults to switching to the first name after deletion)
+     * @param {number} index - Index of the alias to delete
+     * @returns {boolean} Whether the deletion succeeded
+     */
+    deleteName(index) {
+        if (this.#nameList == null) { 
+            console.error(`Deletion failed: alias list does not exist`);
+            return false;
+        }
+
+        if (this.#nameList.length <= 1) { 
+            console.error(`Deletion of ${this.#nameList[index]} failed: cannot leave alias list empty`);
+            return false;
+        }
+        if (index < 0 || index >= this.#nameList.length) { 
+            console.error(`Deletion failed: invalid index`);
+            return false;
+        }
+
+        console.log(`Alias ${this.#nameList[index]} has been deleted`);
+        console.log(`${this.#stationName} has been switched to ${this.#nameList[0]}`);
+
+        this.#nameList.splice(index, 1);
+        this.#stationName = this.#nameList[0];
+        return true;
+    }
+
+    /**
+     * Record the name used when the station was added to a line (internal use by RailWay)
+     * @param {RailWay} line - The line instance
+     * @param {string} boundName - The name at the time of binding
+     */
+    recordLineBinding(line, boundName) {
+        this.#lineToNameMap.set(line, boundName);
+    }
+
+    /**
+     * Get the bound name of this station on a specific line (the name when it joined the line)
+     * @param {RailWay} line - The line instance
+     * @returns {string} The bound name, or the current name if not found
+     */
+    getBoundNameForLine(line) {
+        return this.#lineToNameMap.get(line) || this.#stationName;
+    }
+
+    /**
+     * (Internal use) Ensure a name exists in the alias list and switch the current name to it
+     * @param {string} name - The name to ensure
+     */
+    _ensureNameInList(name) {
+        if (!name) return;
+        if (!this.#nameList.includes(name)) {
+            this.#nameList.push(name);
+        }
+
+        this.#stationName = name;
+    }
+
+    /**
+     * Internal cleanup method, intended for use by RailWay only
+     * @param {RailWay} line - The line instance to clear binding for
+     */
+    _cleanLineBinding(line) {
+        this.#lineToNameMap.delete(line);
+    }
 
     /** Toggle the endpoint flag */
     rollIsStartEnd() {
@@ -268,7 +421,7 @@ class Station {
 
     /**
      * Find the shortest path with transfer penalty (transfer counts as one extra station).
-     * Uses Dijkstra's algorithm on state space (station, current line).
+     * Uses Bidirectional BFS on state space (station, current line).
      * Cost rules:
      *   - Move to adjacent station on the same line: cost 1
      *   - Transfer to another line at the same station: cost 1
@@ -277,120 +430,176 @@ class Station {
      * @returns {Station[] | null} Sequence of stations (including start and end, consecutive duplicates indicate transfers), with linePath property attached; null if unreachable
      */
     goTo(targetStation) {
-        // Start is the target
         if (this === targetStation) return [this];
 
-        // Get lines of start and target
         const startLines = this.getConnectWay();
         if (startLines.length === 0) return null;
         const targetLines = targetStation.getConnectWay();
         if (targetLines.length === 0) return null;
 
-        // Unique key for a state: station name + line name
+        // State key: station name + line name
         const getStateKey = (station, line) => `${station.getStationName()}|${line.getLineName()}`;
 
-        // Distance map: stateKey -> minimum cost from start to this state
-        const dist = new Map();
-        // Predecessor map: stateKey -> { prevKey, station, line } for path reconstruction
-        const prev = new Map();
+        // Forward search structures
+        const distF = new Map();
+        const parentF = new Map();   // stateKey -> parent stateKey
+        const stateInfoF = new Map(); // stateKey -> { station, line }
+        const queueF = [];
 
-        // Priority queue (min-heap), elements of form { cost, station, line }
-        const heap = new MinHeap((a, b) => a.cost - b.cost);
+        // Backward search structures
+        const distB = new Map();
+        const parentB = new Map();
+        const stateInfoB = new Map();
+        const queueB = [];
 
-        // Initialization: start from each line the start station belongs to, cost 0
+        // Initialize forward search from start
         for (const line of startLines) {
-            const stateKey = getStateKey(this, line);
-            dist.set(stateKey, 0);
-            prev.set(stateKey, null);
-            heap.push({ cost: 0, station: this, line });
+            const key = getStateKey(this, line);
+            distF.set(key, 0);
+            parentF.set(key, null);
+            stateInfoF.set(key, { station: this, line });
+            queueF.push(key);
         }
 
-        let bestTargetKey = null;      // Best state key reaching the target
-        let bestTargetCost = Infinity; // Minimum cost to reach target
+        // Initialize backward search from target
+        for (const line of targetLines) {
+            const key = getStateKey(targetStation, line);
+            distB.set(key, 0);
+            parentB.set(key, null);
+            stateInfoB.set(key, { station: targetStation, line });
+            queueB.push(key);
+        }
 
-        // Dijkstra main loop
-        while (!heap.isEmpty()) {
-            const { cost, station, line } = heap.pop();
-            const currentKey = getStateKey(station, line);
+        let meetKey = null;
 
-            // Skip if current cost is greater than recorded (lazy deletion)
-            if (cost > (dist.get(currentKey) ?? Infinity)) continue;
+        // Forward expansion
+        const expandF = () => {
+            if (queueF.length === 0) return;
+            const curKey = queueF.shift();
+            const curDist = distF.get(curKey);
+            const { station, line } = stateInfoF.get(curKey);
 
-            // Check if reached target station (any line)
-            if (station === targetStation) {
-                if (cost < bestTargetCost) {
-                    bestTargetCost = cost;
-                    bestTargetKey = currentKey;
-                }
-                // Continue to possibly find a better way (e.g., entering target from another line with lower cost)
+            // Meeting detection
+            if (distB.has(curKey)) {
+                meetKey = curKey;
+                return true; // stop immediately
             }
 
-            // 1. Move to adjacent station on the same line
-            // Get all neighbors (next + previous), deduplicate with Set
+            // Move along the line to adjacent stations
             const neighbors = [...new Set([...station.getNextStations(), ...station.getUpStations()])];
             for (const neighbor of neighbors) {
-                // Check if neighbor also belongs to the current line
                 if (!neighbor.getConnectWay().includes(line)) continue;
-
-                const newCost = cost + 1;
-                const neighborKey = getStateKey(neighbor, line);
-                if (newCost < (dist.get(neighborKey) ?? Infinity)) {
-                    dist.set(neighborKey, newCost);
-                    prev.set(neighborKey, { prevKey: currentKey, station: neighbor, line });
-                    heap.push({ cost: newCost, station: neighbor, line });
+                const nextKey = getStateKey(neighbor, line);
+                if (!distF.has(nextKey)) {
+                    distF.set(nextKey, curDist + 1);
+                    parentF.set(nextKey, curKey);
+                    stateInfoF.set(nextKey, { station: neighbor, line });
+                    queueF.push(nextKey);
                 }
             }
 
-            // 2. Transfer to another line at the same station (cost +1)
+            // Transfer to another line at the same station
             for (const otherLine of station.getConnectWay()) {
-                if (otherLine === line) continue; // Skip current line
-
-                const newCost = cost + 1;
-                const transferKey = getStateKey(station, otherLine);
-                if (newCost < (dist.get(transferKey) ?? Infinity)) {
-                    dist.set(transferKey, newCost);
-                    prev.set(transferKey, { prevKey: currentKey, station, line: otherLine });
-                    heap.push({ cost: newCost, station, line: otherLine });
+                if (otherLine === line) continue;
+                const nextKey = getStateKey(station, otherLine);
+                if (!distF.has(nextKey)) {
+                    distF.set(nextKey, curDist + 1);
+                    parentF.set(nextKey, curKey);
+                    stateInfoF.set(nextKey, { station, line: otherLine });
+                    queueF.push(nextKey);
                 }
             }
-        }
+            return false;
+        };
 
-        // No reachable path
-        if (bestTargetKey === null) return null;
+        // Backward expansion (symmetric logic)
+        const expandB = () => {
+            if (queueB.length === 0) return;
+            const curKey = queueB.shift();
+            const curDist = distB.get(curKey);
+            const { station, line } = stateInfoB.get(curKey);
 
-        // Reconstruct path: trace back from best target state to start, recording states (station + line)
-        const stationPath = [];
-        const linePath = [];
-        let curKey = bestTargetKey;
-
-        const states = []; // Temporary storage for state order (start to end)
-        while (curKey) {
-            const record = prev.get(curKey);
-            if (!record) {
-                // Reached start state (this)
-                states.unshift({ station: this, line: startLines[0] });
-                break;
+            if (distF.has(curKey)) {
+                meetKey = curKey;
+                return true;
             }
-            states.unshift({ station: record.station, line: record.line });
-            curKey = record.prevKey;
+
+            const neighbors = [...new Set([...station.getNextStations(), ...station.getUpStations()])];
+            for (const neighbor of neighbors) {
+                if (!neighbor.getConnectWay().includes(line)) continue;
+                const nextKey = getStateKey(neighbor, line);
+                if (!distB.has(nextKey)) {
+                    distB.set(nextKey, curDist + 1);
+                    parentB.set(nextKey, curKey);
+                    stateInfoB.set(nextKey, { station: neighbor, line });
+                    queueB.push(nextKey);
+                }
+            }
+
+            for (const otherLine of station.getConnectWay()) {
+                if (otherLine === line) continue;
+                const nextKey = getStateKey(station, otherLine);
+                if (!distB.has(nextKey)) {
+                    distB.set(nextKey, curDist + 1);
+                    parentB.set(nextKey, curKey);
+                    stateInfoB.set(nextKey, { station, line: otherLine });
+                    queueB.push(nextKey);
+                }
+            }
+            return false;
+        };
+
+        // Alternate expansion
+        while (queueF.length > 0 && queueB.length > 0 && meetKey === null) {
+            if (queueF.length <= queueB.length) {
+                if (expandF()) break;
+            } else {
+                if (expandB()) break;
+            }
         }
 
-        // Ensure start is at the beginning
+        if (meetKey === null) return null;
+
+        // Reconstruct path: from meetKey backward to start, forward to target
+        const states = [];  // { station, line }
+
+        // Forward part: trace back from meetKey to start (reverse order)
+        const fPath = [];
+        let key = meetKey;
+        while (key) {
+            const info = stateInfoF.get(key);
+            fPath.unshift({ station: info.station, line: info.line });
+            key = parentF.get(key);
+        }
+
+        // Backward part: from meetKey to target (exclude meetKey itself to avoid duplication)
+        const bPath = [];
+        key = parentB.get(meetKey);
+        while (key) {
+            const info = stateInfoB.get(key);
+            bPath.push({ station: info.station, line: info.line });
+            key = parentB.get(key);
+        }
+
+        // Combine forward and backward paths
+        states.push(...fPath, ...bPath);
+
+        // Make sure start is at the beginning and target at the end
         if (states.length === 0 || states[0].station !== this) {
             states.unshift({ station: this, line: startLines[0] });
         }
-        // Ensure target is at the end
         if (states[states.length - 1].station !== targetStation) {
             states.push({ station: targetStation, line: targetLines[0] });
         }
 
-        // Fill station path and corresponding line path
+        // Build return arrays
+        const stationPath = [];
+        const linePath = [];
         for (const s of states) {
             stationPath.push(s.station);
             linePath.push(s.line);
         }
 
-        // Attach linePath to the array for use by printPathDetailed
         stationPath.linePath = linePath;
         return stationPath;
     }
@@ -458,6 +667,7 @@ class RailWay {
 
         this.#railWayStations.push(station);
         station.addLine(this); // Bidirectional association
+        station.recordLineBinding(this, station.getStationName());
         console.log(`${station.getStationName()} added to ${this.#lineName} line`);
         return true;
     }
@@ -516,6 +726,8 @@ class RailWay {
             station.getConnectWay().splice(lineIndex, 1);
         }
 
+        station._cleanLineBinding(this);
+
         console.log(`${station.getStationName()} removed from ${this.#lineName} line`);
         return true;
     }
@@ -556,6 +768,28 @@ class RailWay {
         insertStation.addLine(this);
 
         console.log(`Inserted ${insertStation.getStationName()} between ${fromStation.getStationName()} and ${nextOnLine.getStationName()}`);
+        return true;
+    }
+
+    /**
+     * Quickly change the bound name of a station on this line
+     * @param {Station} pastStation - The station instance to rename
+     * @param {string} newStationName - The new bound name
+     * @returns {boolean} Whether the change succeeded
+     */
+    changeStationName(pastStation, newStationName) {
+        if (!this.#railWayStations.includes(pastStation)) {
+            console.error(`Station ${pastStation?.getStationName?.() || pastStation} is not on ${this.#lineName} line`);
+            return false;
+        }
+
+        const oldBoundName = pastStation.getBoundNameForLine(this);
+        // Ensure the new name exists in the alias list and switch to it
+        pastStation._ensureNameInList(newStationName);
+        // Update line binding
+        pastStation.recordLineBinding(this, newStationName);
+
+        console.log(`Bound name of ${oldBoundName} on ${this.#lineName} line has been changed to ${newStationName}`);
         return true;
     }
 
@@ -612,7 +846,8 @@ class RailWay {
         console.log(`===== ${this.#lineName} ${this.#isLoop ? '(Loop)' : ''} =====`);
         const stationList = this.#railWayStations.map(s => {
             const lines = s.getConnectWay().map(l => l.getLineName());
-            return `${s.getStationName()}-[${lines.join(', ')}]`;
+            const boundName = s.getBoundNameForLine(this);
+            return `${boundName}-[${lines.join(', ')}]`;
         });
         console.log(`${stationList.join(' → ')}, total ${stationList.length} stations`);
         console.log("===============");
