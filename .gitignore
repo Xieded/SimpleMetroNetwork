@@ -13,6 +13,8 @@ bin-release/
 *.ipa
 *.apk
 *.rsd
+*.out
+*.class
 
 # Project files, i.e. `.project`, `.actionScriptProperties` and `.flexProperties`
 # should NOT be excluded as they contain compiler settings and other important
@@ -22,7 +24,7 @@ bin-release/
 node_modules/
 
 # 测试项目区
-test/
+change.md
 
 # 环境变量文件（可能包含密钥）
 .env
