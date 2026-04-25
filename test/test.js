@@ -1,11 +1,11 @@
+// test/test.js – Basic smoke test for MetroStation.js and MetroStation_zh.js
 import { Station, RailWay, printPathDetailed } from '../MetroStation.js';
-import { ... } from '../MetroStation_zh.js';
-
 import {
   Station as StationZH,
   RailWay as RailWayZH,
   printPathDetailed as printPathDetailedZH,
-} from './MetroStation_zh.js';
+} from '../MetroStation_zh.js';
+
 
 function runTests(StationClass, RailWayClass, printFn, label) {
   console.log(`\n=== Testing ${label} ===`);
