@@ -4,7 +4,7 @@ import {
   Station as StationZH,
   RailWay as RailWayZH,
   printPathDetailed as printPathDetailedZH,
-} from '../MetroStation_zh.js';
+} from '../madeJS/MetroStation_zh.js';
 
 
 function runTests(StationClass, RailWayClass, printFn, label) {
